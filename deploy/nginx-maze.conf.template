@@ -1,0 +1,79 @@
+# /etc/nginx/sites-available/maze.conf    (UNTESTED)   ln -s into sites-enabled/
+# http-context directives (sites-enabled is included inside http{})
+log_format rooms '$remote_addr [$time_local] "$request_method $request_uri" $status upstream=$upstream_addr up_status=$upstream_status';
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+limit_conn_zone $binary_remote_addr zone=perip:10m;
+limit_req_zone  $binary_remote_addr zone=api:10m rate=10r/s;
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name __DOMAIN__;
+    location /.well-known/acme-challenge/ { root /var/www/acme; }   # only used by HTTP-01 on a public host
+    location / { return 301 https://$host$request_uri; }
+}
+
+server {
+    listen 443 ssl http2;          # works on every nginx version (newer ones print a harmless 'deprecated' notice)
+    listen [::]:443 ssl http2;
+    server_name __DOMAIN__;
+
+    ssl_certificate     /etc/letsencrypt/live/__DOMAIN__/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/__DOMAIN__/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:SSL:10m;
+
+    server_tokens off;
+    limit_conn perip 40;
+    gzip off;                                           # ADDED: never re-compress Unity's pre-compressed files
+    add_header X-Content-Type-Options nosniff always;   # NOTE: any add_header inside a location REPLACES inherited ones
+
+    # --- Unity WebGL build (static) ---
+    root /opt/maze/web;
+    index index.html;
+
+    location / {
+        try_files $uri =404;
+        add_header Cache-Control "no-cache";
+        add_header X-Content-Type-Options nosniff always;   # repeated because this location sets its own add_header
+    }
+
+    # Pre-compressed Unity files: correct Content-Encoding + real MIME type
+    location ~ \.wasm\.br$   { types {} default_type application/wasm;         add_header Content-Encoding br;   add_header Cache-Control "public, max-age=31536000, immutable"; }
+    location ~ \.js\.br$     { types {} default_type application/javascript;   add_header Content-Encoding br;   add_header Cache-Control "public, max-age=31536000, immutable"; }
+    location ~ \.data\.br$   { types {} default_type application/octet-stream; add_header Content-Encoding br;   add_header Cache-Control "public, max-age=31536000, immutable"; }
+    location ~ \.wasm\.gz$   { types {} default_type application/wasm;         add_header Content-Encoding gzip; add_header Cache-Control "public, max-age=31536000, immutable"; }
+    location ~ \.js\.gz$     { types {} default_type application/javascript;   add_header Content-Encoding gzip; add_header Cache-Control "public, max-age=31536000, immutable"; }
+    location ~ \.data\.gz$   { types {} default_type application/octet-stream; add_header Content-Encoding gzip; add_header Cache-Control "public, max-age=31536000, immutable"; }
+    location ~ \.wasm$       { types {} default_type application/wasm; }
+
+    # --- Lobby REST API ---
+    location /api/ {
+        limit_req zone=api burst=20 nodelay;
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;      # overwrite, never append a client-supplied value
+        proxy_set_header X-Forwarded-Proto $scheme;
+        client_max_body_size 4k;
+    }
+    location /internal/ { return 404; }                     # heartbeat endpoint is loopback only
+
+    # --- Game rooms: wss://HOST/r/7000 .. /r/7099 -> ws://127.0.0.1:<port>/ ---
+    location ~ ^/r/(?<room_port>70[0-9][0-9])$ {
+        proxy_pass http://127.0.0.1:$room_port/;            # variable + URI: the URI "/" replaces /r/70xx; IP literal needs no resolver
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_read_timeout 3600s;                           # default 60 s would cut idle sockets
+        proxy_send_timeout 3600s;
+        proxy_buffering off;
+        limit_conn perip 12;
+        access_log /var/log/nginx/rooms.log rooms;
+        client_max_body_size 0;
+    }
+}

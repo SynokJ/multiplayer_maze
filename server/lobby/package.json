@@ -1,0 +1,16 @@
+{
+  "name": "maze-lobby",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": { "start": "node src/server.mjs" },
+  "dependencies": {
+    "@fastify/cors": "11.3.1",
+    "@fastify/rate-limit": "11.2.1",
+    "fastify": "5.12.7"
+  },
+  "devDependencies": {
+    "ws": "8.22.0"
+  }
+}

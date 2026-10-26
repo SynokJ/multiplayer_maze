@@ -1,0 +1,49 @@
+# /etc/systemd/system/maze-lobby.service   (UNTESTED)
+[Unit]
+Description=Maze lobby and room supervisor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=maze
+Group=maze
+WorkingDirectory=/opt/maze/lobby
+EnvironmentFile=/etc/maze/lobby.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node src/server.mjs
+Restart=on-failure
+RestartSec=2
+
+# children (Unity servers) live in this unit's cgroup and die with it
+KillMode=control-group
+KillSignal=SIGTERM
+TimeoutStopSec=15
+RuntimeDirectory=maze-lobby
+RuntimeDirectoryMode=0750
+
+LimitNOFILE=8192
+TasksMax=512
+MemoryMax=1700M
+MemoryHigh=1500M
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+SystemCallArchitectures=native
+ReadWritePaths=/opt/maze/server
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=maze-lobby
+
+[Install]
+WantedBy=multi-user.target
