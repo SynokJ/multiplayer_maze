@@ -1,4 +1,4 @@
-# /etc/systemd/system/maze-lobby.service   (UNTESTED)
+# /etc/systemd/system/maze-lobby.service   (installed by deploy/install-on-vm.sh; `systemd-analyze verify` passes)
 [Unit]
 Description=Maze lobby and room supervisor
 After=network-online.target
@@ -22,7 +22,6 @@ TimeoutStopSec=15
 RuntimeDirectory=maze-lobby
 RuntimeDirectoryMode=0750
 
-LimitNOFILE=8192
 TasksMax=512
 MemoryMax=1700M
 MemoryHigh=1500M

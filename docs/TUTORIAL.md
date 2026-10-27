@@ -85,7 +85,7 @@ cd multiplayer_maze
 git checkout claude/laughing-galileo-n6jfav
 ```
 
-> **Your PC must be Intel/AMD (x86-64).** Unity builds the Linux server for x86-64. A Mac with an Apple chip cannot run it in this plan.
+> **Your PC must be Intel/AMD (x86-64).** Unity builds the Linux server for x86-64, so the VM must be x86-64 too. VirtualBox 7.2 can run ARM VMs on Apple-chip Macs, but an ARM VM cannot run that server program.
 
 ### Check it worked
 
@@ -188,13 +188,13 @@ It prints nothing or a different address: wait one minute and retry, or try `nsl
 
 ## Step 4 of 12: Install the software on the VM
 
-**Why this step:** The VM is empty. It needs the door (nginx), the runtime for the lobby (Node 22) and a firewall that lets in only what you need.
+**Why this step:** The VM is empty. It needs the door (nginx), the runtime for the lobby (Node.js) and a firewall that lets in only what you need.
 
 **Needs:**
 - Step 2: your `ssh` login to the VM.
 
 **Gives:**
-- nginx, Node 22, a firewall, and a clock that is correct (needed by certificates).
+- nginx, Node.js 24, a firewall, and a clock that is correct (needed by certificates).
 
 ### Do
 
@@ -203,8 +203,9 @@ Do this **inside the ssh window** (Step 2):
 ```bash
 sudo apt update && sudo apt -y upgrade
 sudo apt install -y nginx python3-venv curl ufw openssl
-# Node 22 (from NodeSource)
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+# Node 24 LTS from NodeSource: download the script, then run it
+curl -fsSL https://deb.nodesource.com/setup_24.x -o nodesource_setup.sh
+sudo -E bash nodesource_setup.sh
 sudo apt install -y nodejs
 # firewall: only ssh, http and https. Allow ssh FIRST or you lock yourself out.
 sudo ufw allow OpenSSH
@@ -217,11 +218,11 @@ Ports 3000 (lobby) and 7000-7099 (rooms) stay closed on purpose. Only nginx on t
 
 ### Check it worked
 
-`node -v` prints `v22...`, `nginx -v` prints a version, `sudo ufw status` lists 22, 80 and 443, and `timedatectl` says `System clock synchronized: yes`.
+`node -v` prints `v24...` (the lobby also passes its tests on Node 22), `nginx -v` prints a version, `sudo ufw status` lists 22, 80 and 443, and `timedatectl` says `System clock synchronized: yes`.
 
 ### If it does not
 
-The NodeSource line fails: check the VM has internet (`ping -c1 deb.nodesource.com`). The clock is wrong: `sudo timedatectl set-ntp true`.
+The NodeSource download fails: check the VM has internet (`ping -c1 deb.nodesource.com`). If `setup_24.x` is refused, use `setup_22.x` instead. The clock is wrong: `sudo timedatectl set-ntp true`.
 
 **Next:** Step 5 asks Let's Encrypt for the certificate. nginx will use it in Step 6.
 
@@ -258,13 +259,14 @@ sudo chmod 600 /root/duckdns.ini
 sudo /opt/certbot/bin/certbot certonly --non-interactive --agree-tos --email $EMAIL \
   --preferred-challenges dns --authenticator dns-duckdns \
   --dns-duckdns-credentials /root/duckdns.ini --dns-duckdns-propagation-seconds 60 \
-  -d $DOMAIN --staging
+  -d $DOMAIN --cert-name $DOMAIN-staging --staging
 
-# 2) the real certificate (same command, without --staging, plus --force-renewal)
+# 2) the real certificate (same command, with the real certificate name and without --staging)
 sudo /opt/certbot/bin/certbot certonly --non-interactive --agree-tos --email $EMAIL \
   --preferred-challenges dns --authenticator dns-duckdns \
   --dns-duckdns-credentials /root/duckdns.ini --dns-duckdns-propagation-seconds 60 \
-  -d $DOMAIN --force-renewal
+  -d $DOMAIN --cert-name $DOMAIN
+sudo /opt/certbot/bin/certbot delete --cert-name $DOMAIN-staging    # remove the rehearsal certificate
 
 # 3) renew automatically and tell nginx
 sudo mkdir -p /etc/letsencrypt/renewal-hooks/deploy
@@ -285,9 +287,9 @@ You see `fullchain.pem` and `privkey.pem`, and the issuer says **Let's Encrypt**
 
 ### If it does not
 
-"Timed out waiting for DNS": raise `--dns-duckdns-propagation-seconds` to 120. After the rehearsal the real run complains about the existing certificate: run `sudo /opt/certbot/bin/certbot delete --cert-name $DOMAIN` and repeat part 2.
+"Timed out waiting for DNS": raise `--dns-duckdns-propagation-seconds` to 120. Something went wrong in part 2: check the files with `sudo /opt/certbot/bin/certbot certificates`; a half-made certificate is removed with `certbot delete --cert-name NAME`.
 
-**Next:** Step 6 installs the server programs. The install script refuses to continue unless this certificate exists.
+**Next:** Step 6 installs the server programs. The install script refuses to continue unless this certificate exists. (For the same VM setup in much more detail, with the evidence for every choice, see docs/VM_SERVER_SETUP.md.)
 
 
 ---
@@ -382,7 +384,7 @@ The answer contains a line like `"path":"/r/7000"`. The number is the room's por
 # 2) open a WebSocket to that room through nginx (stops after 3 seconds)
 curl -i -N --max-time 3 --http1.1 \
   -H "Connection: Upgrade" -H "Upgrade: websocket" \
-  -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: SGVsbG8sIHdvcmxkIQ==" \
+  -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
   https://$DOMAIN/r/7000
 
 # 3) see what nginx did
@@ -397,7 +399,7 @@ Step 2 prints `HTTP/1.1 101 Switching Protocols`. Step 3 shows a line with `"GET
 
 ### If it does not
 
-`502`: the room program is not running (look at `sudo journalctl -u maze-lobby -n 30`). `404`: the path number is outside 7000-7099. `400`/`426`: copy the curl command exactly, including the headers.
+`502`: the room program is not running (look at `sudo journalctl -u maze-lobby -n 30`). `404`: the path number is outside 7000-7099. `400`: the `Sec-WebSocket-Key` must be 16 bytes in base64; copy the curl command exactly (a shorter key gives a 400 from the room itself).
 
 **Next:** The server half is done. Steps 8-10 build the game that will use it.
 
